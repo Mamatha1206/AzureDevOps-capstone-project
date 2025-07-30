@@ -1,0 +1,41 @@
+# Docker
+# Deploy Database Kubernetes Resources to AKS
+# Full Azure DevOps Pipeline for Database Deployment
+
+trigger:
+  paths:
+    include:
+      - capstoneproject/k8s/database/*
+
+resources:
+- repo: self
+
+pool:
+  name: pradhi-agentpool
+
+variables:
+  # Kubernetes service connection
+  kubernetesServiceConnection: 'pradhi-k8s-scn'
+
+stages:
+- stage: Deploy
+  displayName: Deploy Database to AKS
+  jobs:
+  - job: DeployDatabase
+    displayName: Deploy Database Resources to AKS
+    steps:
+    - checkout: self
+
+    - script: |
+        echo "Files in database k8s directory:"
+        ls -R capstoneproject/k8s/database/
+      displayName: ' Debug: List Database Manifest Files'
+
+    - task: KubernetesManifest@1
+      displayName: Deploy Database to AKS
+      inputs:
+        action: 'deploy'
+        connectionType: 'kubernetesServiceConnection'
+        kubernetesServiceConnection: '$(kubernetesServiceConnection)'
+        namespace: 'default'
+        manifests: 'capstoneproject/k8s/database/*.yaml'

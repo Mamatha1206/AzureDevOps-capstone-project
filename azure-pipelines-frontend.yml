@@ -1,0 +1,181 @@
+# Docker
+# Build and push an image to Azure Container Registry
+# https://docs.microsoft.com/azure/devops/pipelines/languages/docker
+
+trigger:
+ paths:
+   include:
+     - capstoneproject/frontend/*
+
+resources:
+- repo: self
+pool:
+  name: pradhi-agentpool
+
+variables:
+  # Container registry service connection established during pipeline creation
+  dockerRegistryServiceConnection: 'f4dc2dce-c93d-481d-9437-1bbdf5f11721'
+  imageRepository: 'frontend'
+  containerRegistry: 'pradhiregistry.azurecr.io'
+  dockerfilePath: '$(Build.SourcesDirectory)/capstoneproject/frontend/Dockerfile'
+  tag: '$(Build.BuildId)'
+
+  # Agent VM image name
+  #vmImageName: 'ubuntu-latest'
+
+stages:
+- stage: Lint
+  displayName: Run ESLint
+  jobs:
+  - job: Lint
+    displayName: Lint Frontend Code
+    steps:
+    - script: |
+        echo "Installing dependencies..."
+        cd $(Build.SourcesDirectory)/capstoneproject/frontend
+        npm install
+
+        echo "Running ESLint..."
+        npx eslint . --ext .js,.jsx
+      displayName: 'Run ESLint'
+      
+- stage: Test
+  displayName: Run Frontend Tests
+  jobs:
+  - job: RunTests
+    displayName: Run Unit Tests
+    steps:
+    - task: NodeTool@0
+      inputs:
+        versionSpec: '18.x'
+      displayName: 'Install Node.js'
+
+    - script: |
+        cd $(Build.SourcesDirectory)/capstoneproject/frontend
+        npm install
+        npm test
+      displayName: 'Run frontend tests'
+
+- stage: SonarQubeScan
+  displayName: SonarQube Analysis
+  dependsOn: Test
+  jobs:
+    - job: SonarScan
+      displayName: Run SonarQube Scan
+      steps:
+        - task: SonarQubePrepare@5
+          displayName: 'Prepare SonarQube Analysis'
+          inputs:
+            SonarQube: 'SonarQube'  
+            scannerMode: 'CLI'
+            configMode: 'manual'
+            cliProjectKey: 'goal-tracker-frontend'
+            cliProjectName: 'Goal Tracker Frontend'
+
+        - script: |
+            cd $(Build.SourcesDirectory)/capstoneproject/frontend
+            npm install
+            npm run test
+          displayName: 'Run Tests with Coverage'
+
+        - task: SonarQubeAnalyze@5
+          displayName: 'Run SonarQube Analysis'
+
+        - task: SonarQubePublish@5
+          displayName: 'Publish SonarQube Quality Gate Result'
+          inputs:
+            pollingTimeoutSec: '300'
+
+      
+- stage: Build
+  displayName: Build and push stage
+  dependsOn: SonarQubeScan
+  jobs:
+  - job: Build
+    displayName: Build
+    
+    steps:
+    - task: Docker@2
+      displayName: Build an image
+      inputs:
+        command: 'build'
+        repository: $(imageRepository)
+        dockerfile: $(dockerfilePath)
+        containerRegistry: $(dockerRegistryServiceConnection)
+        tags: |
+          $(tag)
+          latest
+
+
+    - task: Docker@2
+      displayName: Push an image to container registry
+      inputs:
+        command: 'push'
+        repository: $(imageRepository)
+        dockerfile: $(dockerfilePath)
+        containerRegistry: $(dockerRegistryServiceConnection)
+        tags: |
+          $(tag)
+          latest
+
+- stage: TrivyScan
+  displayName: Trivy Image Scan
+  dependsOn: Build
+  jobs:
+    - job: ImageScan
+      displayName: Scan Image with Trivy
+      steps:
+        - script: trivy image --exit-code 1 --severity HIGH,CRITICAL --ignore-unfixed --ignorefile $(Build.SourcesDirectory)/capstoneproject/frontend/.trivyignore $(containerRegistry)/$(imageRepository):$(tag)
+          displayName: 'Trivy Scan - Fail on HIGH and CRITICAL Vulnerabilities'
+          continueOnError: false
+
+
+- stage: Deploy_main
+  displayName: Deploy Frontend to AKS
+  dependsOn: Build
+  jobs:
+  - job: DeployToAKS
+    displayName: Deploy Frontend to AKS
+    steps:
+    - checkout: self
+
+    - script: |
+        echo "Files in frontend k8s directory:"
+        ls -R capstoneproject/frontend/k8s/
+      displayName: 'Debug: List Frontend Manifest Files'
+
+    - task: KubernetesManifest@1
+      displayName: Deploy Frontend to AKS
+      inputs:
+        action: 'deploy'
+        connectionType: 'kubernetesServiceConnection'
+        kubernetesServiceConnection: 'pradhi-k8s-scn'
+        namespace: 'default'
+        manifests: 'capstoneproject/frontend/k8s/*.yaml'
+        containers: |
+          frontend:$(containerRegistry)/$(imageRepository):$(tag)
+
+- stage: Deploy_backup
+  displayName: Deploy Frontend to AKS
+  dependsOn: Build
+  jobs:
+  - job: DeployToAKS
+    displayName: Deploy Frontend to AKS
+    steps:
+    - checkout: self
+
+    - script: |
+        echo "Files in frontend k8s directory:"
+        ls -R capstoneproject/frontend/k8s/
+      displayName: 'Debug: List Frontend Manifest Files'
+
+    - task: KubernetesManifest@1
+      displayName: Deploy Frontend to AKS
+      inputs:
+        action: 'deploy'
+        connectionType: 'kubernetesServiceConnection'
+        kubernetesServiceConnection: 'k8sconnection1'
+        namespace: 'default'
+        manifests: 'capstoneproject/frontend/k8s/*.yaml'
+        containers: |
+          frontend:$(containerRegistry)/$(imageRepository):$(tag)

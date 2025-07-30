@@ -1,0 +1,36 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: backend
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: backend
+  template:
+    metadata:
+      labels:
+        app: backend
+    spec:
+      containers:
+        - name: backend
+          image: pradhiregistry.azurecr.io/backend:latest
+          ports:
+            - containerPort: 8080
+          env:
+            - name: DB_USERNAME
+              value: "postgres"
+            - name: DB_PASSWORD
+              value: "postgres"
+            - name: DB_HOST
+              value: "postgres"
+            - name: DB_PORT
+              value: "5432"
+            - name: DB_NAME
+              value: "goalsdb"
+            - name: SSL
+              value: "disable"
+            - name: PORT
+              value: "8080"
+      imagePullSecrets:
+        - name: acr-auth
