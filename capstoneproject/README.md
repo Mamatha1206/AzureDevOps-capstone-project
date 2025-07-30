@@ -1,4 +1,4 @@
-# CloudOps Goal Tracker - Three-Tier Architecture
+# Goal Tracker - Three-Tier Architecture
 
 This project demonstrates a modern three-tier architecture:
 
